@@ -269,37 +269,15 @@ def get_model(config, device, should_train=True, verbose=False, state_dict=None,
     else:
         encoder = partial(encoders.Linear, replace_nan_by_zero=True)
         
-        
-    '''
-    if config['max_num_classes'] == 2:
-        loss = Losses.bce
-    elif config['max_num_classes'] > 2:
-        loss = Losses.ce(config['max_num_classes'])
-    '''
-    
-    # 动态计算 pos_weight 的函数
-    def calculate_pos_weight(dl):
-        n_positive, n_negative = 0, 0
-        for _, targets, _ in dl:
-            n_positive += (targets == 1).sum().item()
-            n_negative += (targets == 0).sum().item()
-        if n_positive > 0:
-            return torch.tensor([n_negative / n_positive], dtype=torch.float32)
-        else:
-            print("Warning: No positive samples in the dataset.")
-            return torch.tensor([1.0], dtype=torch.float32)
+    #在调用损失函数前打印维度
+    print(f"logits shape: {logits.shape}, targets shape: {targets.shape}")
     
     if config['max_num_classes'] == 2:
-        # 动态计算 pos_weight
-        pos_weight = calculate_pos_weight(dl).to(device)  # 使用 dl 计算权重
-
-        # 初始化 BCEWithLogitsLoss 并传入 pos_weight
-        loss = nn.BCEWithLogitsLoss(reduction='none', pos_weight=pos_weight)
-        print(f"pos_weight: {pos_weight}")  # 打印 pos_weight 以供调试
+        loss = Losses.bce()
     elif config['max_num_classes'] > 2:
         loss = Losses.ce(config['max_num_classes'])
-
-
+    
+    
     check_is_compatible = False if 'multiclass_loss_type' not in config else (config['multiclass_loss_type'] == 'compatible')
     config['multiclass_type'] = config['multiclass_type'] if 'multiclass_type' in config else 'rank'
     config['mix_activations'] = config['mix_activations'] if 'mix_activations' in config else False
@@ -309,6 +287,7 @@ def get_model(config, device, should_train=True, verbose=False, state_dict=None,
     config['train_mixed_precision'] = True  # 启用混合精度训练
     epochs = 0 if not should_train else config['epochs']
     #print('MODEL BUILDER', model_proto, extra_kwargs['get_batch'])
+    
     model = train(model_proto.DataLoader
                   , loss
                   , encoder

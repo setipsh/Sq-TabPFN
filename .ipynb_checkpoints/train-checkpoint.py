@@ -6,8 +6,6 @@ import datetime
 import yaml
 from contextlib import nullcontext
 
-import pandas
-
 
 import torch
 from torch import nn
@@ -29,6 +27,37 @@ class Losses():
         num_classes = num_classes.shape[0] if torch.is_tensor(num_classes) else num_classes
         return nn.CrossEntropyLoss(reduction='none', weight=torch.ones(num_classes))
     bce = nn.BCEWithLogitsLoss(reduction='none')
+    '''
+    @staticmethod
+    def bce(ignore_index=-100):
+        class BCEWithIgnore(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.loss_fn = nn.BCEWithLogitsLoss(reduction='none')
+
+            def forward(self, logits, targets):
+                # 确保 logits 和 targets 的时间步一致
+                if logits.shape[0] != targets.shape[0]:
+                    min_time_steps = min(logits.shape[0], targets.shape[0])
+                    logits = logits[:min_time_steps, :, :]
+                    targets = targets[:min_time_steps, :]
+
+                # 创建 mask
+                mask = targets != ignore_index
+                mask = mask.unsqueeze(-1)
+
+                valid_logits = logits[mask]
+                valid_targets = targets[mask.squeeze(-1)]
+
+                # 确保形状一致
+                if valid_logits.numel() != valid_targets.numel():
+                    raise RuntimeError("Mismatch in valid_logits and valid_targets shape")
+
+                return self.loss_fn(valid_logits, valid_targets)
+
+        return BCEWithIgnore()
+        '''
+
 
 
 
@@ -50,11 +79,7 @@ def train(priordataloader_class, criterion=None, encoder_generator, emsize=200, 
     print(f'Using {device} device')
     using_dist, rank, device = init_dist(device)
     single_eval_pos_gen = single_eval_pos_gen if callable(single_eval_pos_gen) else lambda: single_eval_pos_gen
-        
-
-        
-    
-
+ 
     def eval_pos_seq_len_sampler():
         single_eval_pos = single_eval_pos_gen()
         if bptt_extra_samples:
@@ -99,13 +124,7 @@ def train(priordataloader_class, criterion=None, encoder_generator, emsize=200, 
     except Exception:
         pass
 
-    model.to(device)
-    
-    # 检查 pos_weight 是否正确设置
-    if isinstance(model.criterion, nn.BCEWithLogitsLoss) and hasattr(model.criterion, 'pos_weight'):
-        print(f"Training with pos_weight: {model.criterion.pos_weight}")
-        
-        
+    model.to(device) 
     if using_dist:
         print("Distributed training")
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank], output_device=rank, broadcast_buffers=False)
@@ -156,7 +175,7 @@ def train(priordataloader_class, criterion=None, encoder_generator, emsize=200, 
                                    , single_eval_pos=single_eval_pos)
 
                     forward_time = time.time() - before_forward
-           
+                    
                     if single_eval_pos is not None:
                         targets = targets[single_eval_pos:]
                     if isinstance(criterion, nn.GaussianNLLLoss):
@@ -240,10 +259,8 @@ def train(priordataloader_class, criterion=None, encoder_generator, emsize=200, 
                     f' data time {time_to_get_batch:5.2f} step time {step_time:5.2f}'
                     f' forward time {forward_time:5.2f}' 
                     f' nan share {nan_share:5.2f} ignore share (for classification tasks) {ignore_share:5.4f}'
-                if rank == 0:
-                    print("=== START DEBUG INFO ===")
-                    print(f"Calculated pos_weight: {pos_weight.item()}")
-                    print("=== END DEBUG INFO ===")
+                    #+ (f'val score {val_score}' if val_score is not None else ''))  
+                    f"| end of epoch {epoch:3d} | val score: {val_score if val_score is not None else 'N/A'}")
                 print('-' * 89)
 
             # stepping with wallclock time based scheduler
@@ -337,7 +354,6 @@ if __name__ == '__main__':
     min_y = args.__dict__.pop('min_y')
     # criterion = nn.MSELoss(reduction='none')
     
-    '''
     if loss_function == 'ce':
         criterion = nn.CrossEntropyLoss(reduction='none')
     elif loss_function == 'gaussnll':
@@ -346,29 +362,6 @@ if __name__ == '__main__':
         criterion = nn.MSELoss(reduction='none')
     else:
         raise NotImplementedError(f'loss_function == {loss_function}.')
-    '''
-    
-                    
-    # 修改损失函数的选择逻辑
-    if loss_function == 'ce':
-        criterion = nn.CrossEntropyLoss(reduction='none')
-    elif loss_function == 'gaussnll':
-        criterion = nn.GaussianNLLLoss(reduction='none', full=True)
-    elif loss_function == 'mse':
-        criterion = nn.MSELoss(reduction='none')
-    elif loss_function == 'bce':
-        # 通过数据集动态计算 pos_weight
-        train_dataset = priors.train_data_loader()  # 假设你可以访问训练数据集
-        pos_weight = calculate_pos_weight(train_dataset)
-        criterion = nn.BCEWithLogitsLoss(reduction='none', pos_weight=pos_weight.to(train_dataset.targets.device))
-    else:
-        raise NotImplementedError(f'loss_function == {loss_function}.')
-                    
-                    
-    criterion = nn.BCEWithLogitsLoss(reduction='none', pos_weight=pos_weight.to(train_dataset.targets.device))
-else:
-    
-
 
     encoder = args.__dict__.pop('encoder')
     y_encoder = args.__dict__.pop('y_encoder')

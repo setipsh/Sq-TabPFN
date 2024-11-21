@@ -5,6 +5,8 @@ from tabpfn.utils import default_device
 
 def get_batch(batch_size, seq_len, num_features, device=default_device
               , hyperparameters=None, batch_size_per_gp_sample=None, **kwargs):
+    
+    print("get_batch is being called")
     batch_size_per_gp_sample = batch_size_per_gp_sample or (min(64, batch_size))
     num_models = batch_size // batch_size_per_gp_sample
     assert num_models * batch_size_per_gp_sample == batch_size, f'Batch size ({batch_size}) not divisible by batch_size_per_gp_sample ({batch_size_per_gp_sample})'
@@ -26,6 +28,9 @@ def get_batch(batch_size, seq_len, num_features, device=default_device
     x, y, y_ = (torch.cat(x, 1).detach()
                                         , torch.cat(y, 1).detach()
                                         , torch.cat(y_, 1).detach())
+    
+    # 每个批次有1152个样本，每个数据集生成16个批次，所以一个数据集有18432个样本
+    
     return x, y, y_
 
 DataLoader = get_batch_to_dataloader(get_batch)

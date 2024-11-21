@@ -34,11 +34,6 @@ class Linear(nn.Linear):
         super().__setstate__(state)
         self.__dict__.setdefault('replace_nan_by_zero', True)
 
-        
-'''
-#只有smote
-'''
-
 '''
 #smote+顺序注意力
 class TabNetModel(nn.Module):
@@ -177,141 +172,8 @@ class TabNetModel(nn.Module):
         
         return output_aggregated, total_entropy, masked_features, embedded_features
 '''
-        
-'''
-#只有顺序注意力
-from imblearn.over_sampling import SMOTE
 
-class TabNetModel(nn.Module):
-    def __init__(
-        self,
-        columns=3,
-        num_features=3,
-        feature_dims=128,
-        output_dim=64,
-        num_decision_steps=6,
-        relaxation_factor=0.5,
-        batch_momentum=0.001,
-        virtual_batch_size=2,
-        num_classes=2,
-        epsilon=0.00001,
-        emsize=64,
-        apply_smote=False  # 新增参数
-    ):
-        super().__init__()
-        
-        # 模型参数初始化
-        self.columns = columns
-        self.num_features = num_features
-        self.feature_dims = feature_dims
-        self.output_dim = output_dim
-        self.num_decision_steps = num_decision_steps
-        self.relaxation_factor = relaxation_factor
-        self.batch_momentum = batch_momentum
-        self.virtual_batch_size = virtual_batch_size
-        self.num_classes = num_classes
-        self.epsilon = epsilon
-        self.apply_smote = apply_smote  # 新增参数
-
-        # 特征变换层
-        self.feature_transform_linear1 = torch.nn.Linear(num_features, self.feature_dims * 2, bias=False)
-        self.BN = torch.nn.BatchNorm1d(num_features, momentum=batch_momentum)
-        self.BN1 = torch.nn.BatchNorm1d(self.feature_dims * 2, momentum=batch_momentum)
-
-        self.feature_transform_linear2 = torch.nn.Linear(self.feature_dims * 2, self.feature_dims * 2, bias=False)
-        self.feature_transform_linear3 = torch.nn.Linear(self.feature_dims * 2, self.feature_dims * 2, bias=False)
-        self.feature_transform_linear4 = torch.nn.Linear(self.feature_dims * 2, self.feature_dims * 2, bias=False)
-
-        self.mask_linear_layer = torch.nn.Linear(self.feature_dims * 2 - output_dim, self.num_features, bias=False)
-        self.BN2 = torch.nn.BatchNorm1d(self.num_features, momentum=batch_momentum)
-
-        self.final_classifier_layer = torch.nn.Linear(self.output_dim, self.num_classes, bias=False)
-
-        # Linear 类实例
-        self.embedding_layer = Linear(num_features, emsize)
-        
-        # SMOTE 实例化
-        if self.apply_smote:
-            self.smote = SMOTE(sampling_strategy='minority')
-
-    def forward(self, data, targets=None):
-        # 应用 SMOTE 平衡处理
-        if self.apply_smote and targets is not None:
-            # 将数据转换为 numpy 格式，SMOTE 需要二维数据
-            data_np = data.cpu().numpy()
-            targets_np = targets.cpu().numpy()
-            
-            # 使用 SMOTE 生成平衡后的数据
-            data_resampled, targets_resampled = self.smote.fit_resample(data_np, targets_np)
-            
-            # 转换回 Tensor
-            data = torch.tensor(data_resampled, dtype=torch.float32, device=data.device)
-            targets = torch.tensor(targets_resampled, dtype=torch.long, device=data.device)
-        
-        batch_size = data.shape[0]
-        features = self.BN(data)
-        output_aggregated = torch.zeros([batch_size, self.output_dim], device=data.device)
-        
-        masked_features = features
-        mask_values = torch.zeros([batch_size, self.num_features], device=data.device)
-        
-        aggregated_mask_values = torch.zeros([batch_size, self.num_features], device=data.device)
-        complemantary_aggregated_mask_values = torch.ones([batch_size, self.num_features], device=data.device)
-        
-        total_entropy = 0
-
-        for ni in range(self.num_decision_steps):
-            if ni == 0:
-                transform_f1 = self.feature_transform_linear1(masked_features)
-                norm_transform_f1 = self.BN1(transform_f1)
-
-                transform_f2 = self.feature_transform_linear2(norm_transform_f1)
-                norm_transform_f2 = self.BN1(transform_f2)
-            
-            else:
-                transform_f1 = self.feature_transform_linear1(masked_features)
-                norm_transform_f1 = self.BN1(transform_f1)
-
-                transform_f2 = self.feature_transform_linear2(norm_transform_f1)
-                norm_transform_f2 = self.BN1(transform_f2)
-
-                transform_f2 = (glu(norm_transform_f2, self.feature_dims) + transform_f1) * np.sqrt(0.5)
-
-                transform_f3 = self.feature_transform_linear3(transform_f2)
-                norm_transform_f3 = self.BN1(transform_f3)
-
-                transform_f4 = self.feature_transform_linear4(norm_transform_f3)
-                norm_transform_f4 = self.BN1(transform_f4)
-
-                transform_f4 = (glu(norm_transform_f4, self.feature_dims) + transform_f3) * np.sqrt(0.5)
-                
-                decision_out = torch.nn.ReLU(inplace=True)(transform_f4[:, :self.output_dim])
-                output_aggregated = torch.add(decision_out, output_aggregated)
-                scale_agg = torch.sum(decision_out, axis=1, keepdim=True) / (self.num_decision_steps - 1)
-                aggregated_mask_values = torch.add(aggregated_mask_values, mask_values * scale_agg)
-
-                features_for_coef = (transform_f4[:, self.output_dim:])
-                
-                if ni < (self.num_decision_steps - 1):
-                    mask_linear_layer = self.mask_linear_layer(features_for_coef)
-                    mask_linear_norm = self.BN2(mask_linear_layer)
-                    mask_linear_norm = torch.mul(mask_linear_norm, complemantary_aggregated_mask_values)
-                    mask_values = sparsemax(mask_linear_norm)
-                    
-                    complemantary_aggregated_mask_values = torch.mul(complemantary_aggregated_mask_values, self.relaxation_factor - mask_values)
-                    total_entropy = torch.add(total_entropy, torch.mean(torch.sum(-mask_values * torch.log(mask_values + self.epsilon), axis=1)) / (self.num_decision_steps - 1))
-                    masked_features = torch.mul(mask_values, features)
-
-            embedded_features = self.embedding_layer(masked_features)
-        
-        return output_aggregated, total_entropy, masked_features, embedded_features
-'''
-
-
-
-        
-
-#只有顺序注意力
+#只有顺序注意力+启用顺序注意力参数设置
 class TabNetModel(nn.Module):
     
     def __init__(
@@ -327,6 +189,7 @@ class TabNetModel(nn.Module):
         num_classes = 2,
         epsilon = 0.00001,
         emsize=64,
+        use_sequential_attention=False  # 新增参数
     ):
         
         super().__init__()
@@ -341,6 +204,7 @@ class TabNetModel(nn.Module):
         self.virtual_batch_size = virtual_batch_size
         self.num_classes = num_classes
         self.epsilon = epsilon
+        self.use_sequential_attention = use_sequential_attention  # 新增参数
         
         self.feature_transform_linear1 = torch.nn.Linear(num_features, self.feature_dims * 2, bias=False)
         self.BN = torch.nn.BatchNorm1d(num_features, momentum = batch_momentum)
@@ -357,6 +221,11 @@ class TabNetModel(nn.Module):
         
         # 创建 Linear 类的实例
         self.embedding_layer = Linear(num_features, emsize)
+        
+        # 顺序注意力机制（如果启用）
+        if self.use_sequential_attention:
+            self.attention_layer = nn.MultiheadAttention(embed_dim=self.feature_dims * 2, num_heads=4, batch_first=True)
+
     
     def encoder(self, data):
         
@@ -401,6 +270,12 @@ class TabNetModel(nn.Module):
 
                 # GLU
                 transform_f4 = (glu(norm_transform_f4, self.feature_dims) + transform_f3) * np.sqrt(0.5)
+                
+                # 使用顺序注意力机制
+                if self.use_sequential_attention:
+                    # 使用注意力层进行变换
+                    norm_transform_f4, _ = self.attention_layer(norm_transform_f4.unsqueeze(0), norm_transform_f4.unsqueeze(0), norm_transform_f4.unsqueeze(0))
+                    norm_transform_f4 = norm_transform_f4.squeeze(0)
                 
                 decision_out = torch.nn.ReLU(inplace=True)(transform_f4[:, :self.output_dim])
                 # Decision aggregation
