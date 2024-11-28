@@ -45,62 +45,26 @@ def load_model_only_inference(path, filename, device):
 
     model_state, optimizer_state, config_sample = torch.load(os.path.join(path, filename), map_location='cpu')
     
-    '''
     if (('nan_prob_no_reason' in config_sample and config_sample['nan_prob_no_reason'] > 0.0) or
         ('nan_prob_a_reason' in config_sample and config_sample['nan_prob_a_reason'] > 0.0) or
         ('nan_prob_unknown_reason' in config_sample and config_sample['nan_prob_unknown_reason'] > 0.0)):
         encoder = encoders.NanHandlingEncoder
     else:
-        encoder = partial(encoders.Linear, replace_nan_by_zero=True)
-    ''' 
+        encoder = partial(encoders.ModelWithAttention, output_dim=config_sample['output_dim'], n_steps=3, gamma=1.3, epsilon=1e-15)
     
-    if (('nan_prob_no_reason' in config and config['nan_prob_no_reason'] > 0.0) or
-        ('nan_prob_a_reason' in config and config['nan_prob_a_reason'] > 0.0) or
-        ('nan_prob_unknown_reason' in config and config['nan_prob_unknown_reason'] > 0.0)):
-        encoder = encoders.NanHandlingEncoder
-    else:
-        if 'encoder' in config:
-            if config['encoder'] == 'attention':
-                if 'output_dim' not in config:
-                    raise ValueError("For 'attention' encoder, 'output_dim' must be specified in the config.")
-                encoder = partial(encoders.ModelWithAttention, output_dim=config['output_dim'], n_steps=3, gamma=1.3, epsilon=1e-15)
-                print("Using ModelWithAttention as encoder")
-            elif config['encoder'] == 'linear':
-                encoder = partial(encoders.Linear, replace_nan_by_zero=True)
-            elif config['encoder'] == 'mlp':
-                encoder = encoders.MLP
-            else:
-                raise NotImplementedError(f"Encoder type {config['encoder']} is not supported.")
-        else:
-            encoder = partial(encoders.Linear, replace_nan_by_zero=True)  # 默认 Linear
-
     n_out = config_sample['max_num_classes']
 
     device = device if torch.cuda.is_available() else 'cpu:0'
-    if config_sample['encoder'] == 'attention':
-        encoder = encoder(
+    encoder = encoder(
             config_sample['num_features'],  # 输入特征数
             config_sample['emsize'],       # 嵌入维度
-            config_sample['output_dim'],  # 输出维度
+            #config_sample['output_dim'],  # 输出维度
             n_steps=3,                     # 注意力机制步骤数
             gamma=1.3,                     # gamma 参数
             epsilon=1e-15                  # epsilon 参数
         )
-    else:
-        encoder = encoder(
-            config_sample['num_features'],  # 输入特征数
-            config_sample['emsize'],       # 嵌入维度
-            config_sample['emsize']        # 输出维度（适用于线性或其他编码器）
-        )
-
     print(f"Initialized encoder: {encoder}")
-
-    '''
-    n_out = config_sample['max_num_classes']
-
-    device = device if torch.cuda.is_available() else 'cpu:0'
-    encoder = encoder(config_sample['num_features'], config_sample['emsize'])
-    '''
+    
 
     nhid = config_sample['emsize'] * config_sample['nhid_factor']
     y_encoder_generator = encoders.get_Canonical(config_sample['max_num_classes']) \

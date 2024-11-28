@@ -185,54 +185,7 @@ class NanHandlingEncoder(nn.Module):
             x = torch.nan_to_num(x, nan=0.0)
         return self.layer(x)
 
-'''
-class SequentialAttention(nn.Module):
-    def __init__(self, input_dim, emsize=256, output_dim=256, num_steps=4, relaxation_factor=0.5, batch_momentum=0.01, epsilon=1e-5):
-        super().__init__()
-        self.input_dim = input_dim
-        self.emsize = emsize
-        self.output_dim = output_dim
-        self.num_steps = num_steps
-        self.relaxation_factor = relaxation_factor
-        self.batch_momentum = batch_momentum
-        self.epsilon = epsilon
 
-        # 修改投影输出为 emsize
-        self.input_projection = nn.Linear(input_dim, emsize, bias=False)
-
-        # 定义批归一化层
-        self.BN_input = nn.BatchNorm1d(emsize)
-        self.BN_hidden = nn.BatchNorm1d(emsize, momentum=batch_momentum)
-
-        # 修改嵌入维度为 emsize
-        self.attention = nn.MultiheadAttention(embed_dim=emsize, num_heads=4)
-        
-    def _glu(self, act, n_units):
-        """
-        门控线性单元 (GLU)
-        :param act: 输入张量，形状为 (batch_size, seq_len, 2 * n_units)
-        :param n_units: 激活后的特征维度
-        :return: GLU 激活后的张量，形状为 (batch_size, seq_len, n_units)
-        """
-        return act[:, :, :n_units] * torch.sigmoid(act[:, :, n_units:])
-
-    def forward(self, x):
-        batch_size, seq_len, input_dim = x.shape
-
-        # 投影到 emsize 的嵌入维度
-        x = self.input_projection(x)  # (batch_size, seq_len, emsize)
-        #print(f"Shape after input projection: {x.shape}")
-
-        # 调整为 (seq_len, batch_size, emsize)
-        x = x.permute(1, 0, 2)
-        #print(f"Shape before MultiheadAttention: {x.shape}")
-
-        # 多头注意力
-        attn_output, _ = self.attention(x, x, x)
-        #print(f"Shape after MultiheadAttention: {attn_output.shape}")
-
-        return attn_output.permute(1, 0, 2)  # 恢复为 (batch_size, seq_len, emsize)
-'''
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
 import math
